@@ -10,7 +10,6 @@ name: release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -30,6 +29,8 @@ jobs:
 
   release:
     needs: test
+    # Only a version tag publishes, so no branch build is ever signed and released.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +39,6 @@ jobs:
         with:
           workspaces: src-tauri
       - name: Tag matches the app version
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
