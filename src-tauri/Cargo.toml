@@ -1,0 +1,72 @@
+[package]
+name = "aveecare-qb-connector"
+version = "0.1.0"
+description = "AveeCare QuickBooks Connector: sends AveeCare payroll hours and invoices straight to QuickBooks Desktop"
+authors = ["AveeCare"]
+license = "UNLICENSED"
+edition = "2021"
+rust-version = "1.80"
+default-run = "aveecare-qb-connector"
+
+[lib]
+name = "aveecare_qb_connector_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "aveecare-qb-connector"
+path = "src/main.rs"
+
+# Headless sync, for the end-to-end test against a local AveeCare stack and the
+# QuickBooks emulator. Never shipped in the installer.
+[[bin]]
+name = "aveecare-qb-sync"
+path = "src/bin/aveecare-qb-sync.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-process = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+num-bigint = "0.4"
+num-traits = "0.2"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+url = "2"
+keyring = { version = "3", features = ["windows-native"] }
+dirs = "6"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Ole",
+  "Win32_System_Variant",
+  "Win32_System_Threading",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_Security",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+tiny_http = "0.12"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

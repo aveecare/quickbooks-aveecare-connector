@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AveeCare QuickBooks Connector</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- Loading -->
+  <main id="view-loading" class="view center">
+    <img class="mark" src="icon.png" alt="" width="56" height="56" />
+  </main>
+
+  <!-- Sign in -->
+  <main id="view-signin" class="view center" hidden>
+    <form id="signin-form" class="auth-card" autocomplete="on" novalidate>
+      <img class="mark" src="icon.png" alt="" width="56" height="56" />
+      <h1>Sign in to AveeCare</h1>
+      <p class="muted">Use the login you use for AveeCare. Only office staff who run payroll or billing can connect QuickBooks.</p>
+
+      <div id="signin-password-step">
+        <label class="field">
+          <span>Email</span>
+          <input id="signin-email" type="email" autocomplete="username" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="signin-password" type="password" autocomplete="current-password" required />
+        </label>
+      </div>
+
+      <div id="signin-code-step" hidden>
+        <label class="field">
+          <span>Six-digit code from your authenticator app</span>
+          <input id="signin-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="[0-9 ]*" />
+        </label>
+      </div>
+
+      <p id="signin-error" class="form-error" role="alert" hidden></p>
+      <button id="signin-submit" class="btn primary wide" type="submit" data-analytics-id="qbc-signin-submit">Sign in</button>
+      <button id="signin-back" class="btn quiet wide" type="button" hidden data-analytics-id="qbc-signin-back">Use a different login</button>
+      <p class="server-line muted small">Connecting to <button id="signin-server" class="link" type="button" data-analytics-id="qbc-signin-server"></button></p>
+      <div id="signin-server-edit" class="inline-form" hidden>
+        <input id="signin-server-url" type="url" spellcheck="false" aria-label="AveeCare server address" />
+        <button id="signin-server-use" class="btn" type="button" data-analytics-id="qbc-signin-server-use">Use</button>
+      </div>
+    </form>
+  </main>
+
+  <!-- Signed in -->
+  <div id="view-app" class="view app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <img src="icon.png" alt="" width="28" height="28" />
+        <div>
+          <div class="brand-name">AveeCare Connector</div>
+          <div id="agency-name" class="muted small"></div>
+        </div>
+      </div>
+      <nav class="segmented" role="tablist" aria-label="Sections">
+        <button role="tab" data-tab="sync" class="active" data-analytics-id="qbc-tab-sync">Sync</button>
+        <button role="tab" data-tab="activity" data-analytics-id="qbc-tab-activity">Activity</button>
+        <button role="tab" data-tab="settings" data-analytics-id="qbc-tab-settings">Settings</button>
+      </nav>
+    </header>
+
+    <!-- Sync tab -->
+    <section id="tab-sync" class="tab">
+      <div class="card status-card">
+        <div class="status-row">
+          <span id="qb-dot" class="dot"></span>
+          <div class="status-text">
+            <div id="qb-title" class="status-title">Checking QuickBooks…</div>
+            <div id="qb-sub" class="muted small"></div>
+          </div>
+          <button id="sync-btn" class="btn primary" data-analytics-id="qbc-sync-now">Sync now</button>
+        </div>
+
+        <div id="qb-fix" class="callout" hidden>
+          <p id="qb-fix-text"></p>
+          <div class="callout-actions">
+            <button id="qb-elevate" class="btn" hidden data-analytics-id="qbc-restart-elevated">Restart as administrator</button>
+          </div>
+        </div>
+
+        <div id="progress" class="progress-area" hidden>
+          <div class="progress-head">
+            <span id="progress-label">Connecting to QuickBooks…</span>
+            <button id="cancel-btn" class="btn quiet small-btn" data-analytics-id="qbc-sync-stop">Stop</button>
+          </div>
+          <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+          <p id="progress-hint" class="muted small" hidden></p>
+        </div>
+      </div>
+
+      <div id="result-area"></div>
+
+      <h2 class="section-title">Recent</h2>
+      <ul id="recent-list" class="run-list"></ul>
+      <p id="recent-empty" class="muted empty" hidden>No syncs yet. When your office sends payroll or invoices to QuickBooks Desktop in AveeCare, press Sync now.</p>
+    </section>
+
+    <!-- Activity tab -->
+    <section id="tab-activity" class="tab" hidden>
+      <div id="activity-list-view">
+        <div class="section-head">
+          <h2 class="section-title">Activity</h2>
+          <button id="clear-history" class="btn quiet small-btn" data-analytics-id="qbc-clear-history">Clear</button>
+        </div>
+        <ul id="activity-list" class="run-list"></ul>
+        <p id="activity-empty" class="muted empty" hidden>Nothing here yet.</p>
+      </div>
+      <div id="run-detail" hidden></div>
+    </section>
+
+    <!-- Settings tab -->
+    <section id="tab-settings" class="tab" hidden>
+      <div class="card settings">
+        <div class="setting">
+          <div>
+            <div class="setting-title">Sync automatically</div>
+            <div class="muted small">While QuickBooks is open, the Connector checks AveeCare for anything waiting.</div>
+          </div>
+          <select id="auto-sync" data-analytics-id="qbc-auto-sync">
+            <option value="0">Off</option>
+            <option value="15">Every 15 minutes</option>
+            <option value="30">Every 30 minutes</option>
+            <option value="60">Every hour</option>
+            <option value="120">Every 2 hours</option>
+            <option value="240">Every 4 hours</option>
+          </select>
+        </div>
+        <div class="setting">
+          <div>
+            <div class="setting-title">Start with Windows</div>
+            <div class="muted small">Opens quietly in the tray when you sign in to Windows.</div>
+          </div>
+          <label class="switch">
+            <input id="start-with-windows" type="checkbox" data-analytics-id="qbc-start-with-windows" />
+            <span></span>
+          </label>
+        </div>
+        <p id="settings-saved" class="muted small saved" hidden>Saved.</p>
+      </div>
+
+      <div class="card settings">
+        <div class="setting">
+          <div>
+            <div class="setting-title">Signed in as</div>
+            <div id="account-line" class="muted small"></div>
+          </div>
+          <button id="signout-btn" class="btn" data-analytics-id="qbc-sign-out">Sign out</button>
+        </div>
+        <div class="setting">
+          <div>
+            <div class="setting-title">Version <span id="version"></span></div>
+            <div id="update-line" class="muted small">Updates install from AveeCare's GitHub releases.</div>
+          </div>
+          <button id="update-btn" class="btn" data-analytics-id="qbc-check-update">Check for updates</button>
+        </div>
+      </div>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="card settings">
+          <div class="setting column">
+            <div class="setting-title">AveeCare server</div>
+            <div class="muted small">Change only if AveeCare support asks you to. Changing it signs you out.</div>
+            <form id="server-form" class="inline-form">
+              <input id="server-url" type="url" spellcheck="false" />
+              <button class="btn" type="submit" data-analytics-id="qbc-set-server">Use</button>
+            </form>
+            <p id="server-error" class="form-error" hidden></p>
+          </div>
+          <div class="setting column">
+            <div class="setting-title">Data folder</div>
+            <div id="data-dir" class="muted small mono"></div>
+          </div>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <template id="run-row">
+    <li class="run-row" tabindex="0" role="button">
+      <span class="run-icon"></span>
+      <div class="run-main">
+        <div class="run-title"></div>
+        <div class="run-sub muted small"></div>
+      </div>
+      <span class="chev" aria-hidden="true">›</span>
+    </li>
+  </template>
+</body>
+</html>

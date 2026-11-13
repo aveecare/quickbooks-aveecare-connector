@@ -1,0 +1,9 @@
+{
+  "name": "aveecare-qb-connector",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AveeCare QuickBooks Connector (Tauri v2). The UI is plain HTML/CSS/JS in ui/; no build step.",
+  "scripts": {
+    "tauri": "tauri"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AveeCare QuickBooks Connector",
+  "mainBinaryName": "AveeCare QuickBooks Connector",
+  "version": "../package.json",
+  "identifier": "com.aveecare.qbconnector",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "AveeCare QuickBooks Connector",
+        "width": 880,
+        "height": 640,
+        "minWidth": 720,
+        "minHeight": 520,
+        "center": true,
+        "visible": false,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "createUpdaterArtifacts": true,
+    "publisher": "AveeCare",
+    "copyright": "AveeCare",
+    "category": "Business",
+    "shortDescription": "Sends AveeCare payroll hours and invoices to QuickBooks Desktop",
+    "longDescription": "The AveeCare QuickBooks Connector replaces Intuit's Web Connector for AveeCare agencies on QuickBooks Desktop. Sign in with your AveeCare login and the Connector sends the payroll hours and invoices your office queued in AveeCare straight to the company file open in QuickBooks.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": "en-US"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDcwOTZCOTdENTI3MkJEMTgKUldRWXZYSlNmYm1XY0NmemZqMk5UKzFad1VmNjVZMmdYRmxCV0MxbldWRlhlaTM3TUZlN2VNenQK",
+      "endpoints": [
+        "https://github.com/aveecare/quickbooks-aveecare-connector/releases/latest/download/latest.json"
+      ],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}
