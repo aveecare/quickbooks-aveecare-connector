@@ -65,7 +65,11 @@ const glyphFor = { ok: '✓', warn: '!', bad: '!', idle: '–' };
 function headline(run) {
   const refused = run.totals?.refused || 0;
   switch (run.status) {
-    case 'completed': return 'Everything went in';
+    case 'completed': {
+      const steps = run.steps || [];
+      const landed = steps.some((s) => s.outcome === 'landed' && s.kind !== 'read');
+      return !landed && steps.some((s) => s.outcome === 'already') ? 'Nothing needed changing' : 'Everything went in';
+    }
     case 'completedWithProblems': return `${plural(refused, 'item needs', 'items need')} attention`;
     case 'nothingToSend': return 'Nothing was waiting to send';
     case 'canceled': return 'You stopped this sync';
@@ -83,7 +87,10 @@ function landedLine(run) {
   if (t.paymentsLanded) parts.push(`${plural(t.paymentsLanded, 'payment', 'payments')} (${money(t.paymentCentsLanded || 0)})`);
   if (t.mileageChecksLanded) parts.push(`${plural(t.mileageChecksLanded, 'mileage check', 'mileage checks')} (${money(t.mileageCentsLanded || 0)})`);
   if (t.changesLanded) parts.push(`${plural(t.changesLanded, 'change', 'changes')} made in QuickBooks`);
-  if (t.already) parts.push(`${plural(t.already, 'item was', 'items were')} already in QuickBooks`);
+  const alreadyChanges = (run.steps || []).filter((s) => s.outcome === 'already' && s.kind === 'change').length;
+  const alreadyIn = Math.max(0, (t.already || 0) - alreadyChanges);
+  if (alreadyIn) parts.push(`${plural(alreadyIn, 'item was', 'items were')} already in QuickBooks`);
+  if (alreadyChanges) parts.push(`${plural(alreadyChanges, 'change was', 'changes were')} already done in QuickBooks`);
   return parts.join(' · ');
 }
 
@@ -284,10 +291,15 @@ function resultCard(run, { full } = {}) {
   const steps = run.steps || [];
   const problems = steps.filter((s) => s.outcome === 'refused' || s.outcome === 'stopped');
   const landed = steps.filter((s) => s.outcome === 'landed' && s.kind !== 'read');
-  const already = steps.filter((s) => s.outcome === 'already');
+  // An "already" undo or update (gone, or matching) is not a send QuickBooks
+  // deduplicated, so the two are named apart.
+  const alreadyDone = steps.filter((s) => s.outcome === 'already' && s.kind === 'change');
+  const already = steps.filter((s) => s.outcome === 'already' && s.kind !== 'change');
   const reads = steps.filter((s) => s.outcome === 'read' || s.kind === 'read');
   card.append(group('Needs attention', problems));
   card.append(group('Landed in QuickBooks', full ? landed : landed.slice(0, 8)));
+  // Shown even on the short card, so a run that changed nothing says why.
+  card.append(group('Already done in QuickBooks', full ? alreadyDone : alreadyDone.slice(0, 8)));
   if (!full && landed.length > 8) {
     const more = el('button', 'link', `Show all ${landed.length}`);
     more.dataset.analyticsId = 'qbc-show-all-landed';

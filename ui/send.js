@@ -414,6 +414,294 @@ async function sendInvoices(ids, warnings, btn) {
   }
 }
 
+// ---------- recent sends: what is in QuickBooks, and fixing it ----------
+//
+// The same send history and undo the web app's "QuickBooks Desktop send
+// history" panel uses (components/qbwc/qbd-send-history.tsx): billing's
+// qbd-send-history, or payroll's for someone with Billing turned off, and
+// qbd-queue-changes / queueQuickBooksDesktopChanges to remove records.
+// Nothing changes QuickBooks here: each press queues work for the next sync.
+
+const hist = { data: null, viaPayroll: false, busy: false, invoiceAction: 'delete' };
+
+const recordStateWords = {
+  'in-quickbooks': 'In QuickBooks',
+  waiting: 'Waiting to send',
+  refused: 'Refused by QuickBooks',
+  'not-in-quickbooks': 'Not in QuickBooks',
+};
+
+const changeStateWords = {
+  pending: 'Waiting for the next QuickBooks sync',
+  running: 'Being done in QuickBooks now',
+  retry: 'Will try again on the next sync',
+  done: 'Done in QuickBooks',
+  'already-gone': 'Already gone from QuickBooks',
+  held: 'Needs your decision',
+  conflict: 'Changed in QuickBooks since AveeCare sent it',
+  failed: 'QuickBooks refused it',
+  'kept-theirs': 'Kept the QuickBooks version',
+  canceled: 'Canceled',
+};
+
+const isPayrollRecord = (t) => t === 'visit' || t === 'block';
+/** Payroll records go through payroll-api, so someone with Billing off can still fix a payroll send. */
+const writeApi = (payrollRecord) => (hist.viaPayroll || payrollRecord ? 'payroll' : 'billing');
+
+async function loadHistory() {
+  const area = $('hist-area');
+  if (!area.childElementCount) area.replaceChildren(el('p', 'muted small', 'Reading AveeCare…'));
+  try {
+    try {
+      hist.data = await aveecare('billing', 'qbd-send-history', { scope: 'all', days: 14 });
+      hist.viaPayroll = false;
+    } catch (e) {
+      // Billing turned off for this person: payroll's own history still works.
+      if (e?.code === 'SignedOut' || e?.code === 'Network') throw e;
+      hist.data = await aveecare('payroll', 'getQuickBooksDesktopSendHistory', { days: 14 });
+      hist.viaPayroll = true;
+    }
+    renderHistoryArea();
+  } catch (e) {
+    area.replaceChildren(callout('bad', errText(e)));
+  }
+}
+
+function groupDecisions(changes) {
+  const groups = new Map();
+  for (const c of changes) {
+    const key = c.state === 'conflict' ? `one:${c.id}` : `${c.state}:${c.reason || ''}:${c.kind}:${c.action}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  return [...groups.values()];
+}
+
+function decisionChoices(first) {
+  if (first.state === 'conflict') return [['apply-ours', "Use AveeCare's version"], ['keep-theirs', 'Keep the QuickBooks version']];
+  if (first.state === 'held' && ['paycheck', 'paycheck-unknown', 'billed'].includes(first.reason)) return [['go-ahead', 'Go ahead anyway'], ['cancel', 'Cancel']];
+  return [['retry', 'Try again'], ['cancel', 'Cancel']];
+}
+
+async function resolveGroup(changes, decision, btn) {
+  if (hist.busy) return;
+  hist.busy = true;
+  btn.disabled = true;
+  let failed = 0;
+  let firstError = '';
+  for (const c of changes) {
+    const api = writeApi(isPayrollRecord(c.recordType));
+    try {
+      await aveecare(api, api === 'payroll' ? 'resolveQuickBooksDesktopChange' : 'qbd-resolve-change', { changeId: c.id, decision });
+    } catch (e) {
+      failed += 1;
+      if (!firstError) firstError = errText(e);
+    }
+  }
+  hist.busy = false;
+  await loadHistory();
+  if (failed) $('hist-area').prepend(callout('bad', `${plural(failed, 'decision', 'decisions')} did not go through: ${firstError}`));
+}
+
+function decisionCard(changes) {
+  const first = changes[0];
+  const box = el('div', 'callout warn decision');
+  const verb = first.kind === 'update' ? 'Update' : first.action === 'void' ? 'Void' : first.action === 'resend' ? 'Delete and send again' : 'Remove';
+  box.append(el('p', 'review-sub', `${verb}: ${changeStateWords[first.state] || first.state}`));
+  const names = changes.slice(0, 4).map((c) => c.label).join(', ') + (changes.length > 4 ? `, and ${changes.length - 4} more` : '');
+  box.append(el('p', 'small', names));
+  if (first.message) box.append(el('p', 'small', first.message));
+  if (first.fix) box.append(el('p', 'small muted', first.fix));
+  const actions = el('div', 'callout-actions');
+  for (const [decision, label] of decisionChoices(first)) {
+    const quiet = decision === 'cancel' || decision === 'keep-theirs';
+    const b = el('button', quiet ? 'btn small-btn' : 'btn primary small-btn', changes.length > 1 && !quiet ? `${label} (${changes.length})` : label);
+    b.type = 'button';
+    b.dataset.analyticsId = `qbc-hist-${decision}`;
+    b.addEventListener('click', () => resolveGroup(changes, decision, b));
+    actions.append(b);
+  }
+  box.append(actions);
+  return box;
+}
+
+const batchTitle = { payroll: 'Payroll', invoices: 'Invoices', payments: 'Payments' };
+
+function batchSummary(b) {
+  const count = {};
+  for (const r of b.records) count[r.state] = (count[r.state] || 0) + 1;
+  const parts = [];
+  if (count['in-quickbooks']) parts.push(`${count['in-quickbooks']} in QuickBooks`);
+  if (count.refused) parts.push(`${count.refused} refused`);
+  if (count.waiting) parts.push(`${count.waiting} waiting`);
+  if (count['not-in-quickbooks']) parts.push(`${count['not-in-quickbooks']} not in QuickBooks`);
+  return parts.join(' · ');
+}
+
+async function removeRecords(batch, records, btn) {
+  if (hist.busy || !records.length) return;
+  hist.busy = true;
+  btn.disabled = true;
+  const api = writeApi(batch.kind === 'payroll');
+  const op = api === 'payroll' ? 'queueQuickBooksDesktopChanges' : 'qbd-queue-changes';
+  const request = {
+    kind: 'undo',
+    action: batch.kind === 'invoices' ? hist.invoiceAction : 'delete',
+    records: records.map((r) => ({ recordType: r.recordType, recordId: r.recordId })),
+  };
+  let queued = 0;
+  const refused = [];
+  try {
+    // The server queues what it has time for and names the rest; send the
+    // rest again under the same job until none remain (as the web app does).
+    const first = await aveecare(api, op, request);
+    queued += (first?.queued || []).length;
+    refused.push(...(first?.refused || []));
+    let rest = first?.remaining || [];
+    while (rest.length) {
+      const next = await aveecare(api, op, { ...request, records: rest, jobId: first.jobId });
+      queued += (next?.queued || []).length;
+      refused.push(...(next?.refused || []));
+      const left = next?.remaining || [];
+      if (left.length >= rest.length) {
+        refused.push(...left.map(() => ({ message: 'This record could not be queued. Try again.' })));
+        break;
+      }
+      rest = left;
+    }
+  } catch (e) {
+    refused.push({ message: errText(e) });
+  }
+  hist.busy = false;
+  await loadHistory();
+  const area = $('hist-area');
+  if (refused.length) area.prepend(callout('bad', `${plural(refused.length, 'record was', 'records were')} not queued: ${refused[0].message}`));
+  if (queued) await syncAfterQueue(area, `${plural(queued, 'record', 'records')} will be removed from QuickBooks.`);
+}
+
+function batchNode(b) {
+  const d = el('details', 'batch');
+  const sum = el('summary');
+  sum.append(
+    el('span', 'batch-title', `${batchTitle[b.kind] || b.kind} · ${when(b.queuedAt)}`),
+    el('span', 'muted small', ` ${plural(b.records.length, 'record', 'records')} · ${batchSummary(b)}`),
+  );
+  d.append(sum);
+  const list = el('ul', 'record-list');
+  const remove = el('button', 'btn small-btn', 'Remove selected from QuickBooks');
+  const boxes = [];
+  for (const r of b.records) {
+    const li = el('li', `record ${r.state}`);
+    const removable = r.state === 'in-quickbooks' && !r.openChangeId;
+    const box = el('input');
+    box.type = 'checkbox';
+    box.disabled = !removable;
+    box.setAttribute('aria-label', r.label);
+    box.addEventListener('change', () => { remove.disabled = !chosen().length; });
+    boxes.push([box, r]);
+    const main = el('div', 'record-main');
+    const day = r.date ? shortDate(String(r.date).slice(0, 10)) : '';
+    main.append(el('div', null, day && !r.label.includes(day) ? `${r.label} · ${day}` : r.label));
+    const state = r.openChangeId ? 'A change is waiting for the next sync' : (recordStateWords[r.state] || r.state);
+    main.append(el('div', 'muted small', r.detail ? `${state}: ${r.detail}` : state));
+    li.append(box, main);
+    list.append(li);
+  }
+  d.append(list);
+  // What is ticked right now, read from the boxes at the moment of the press.
+  const chosen = () => boxes.filter(([box]) => box.checked && !box.disabled).map(([, r]) => r);
+  const confirmArea = el('div', 'review');
+  const actions = el('div', 'send-actions');
+  remove.type = 'button';
+  remove.disabled = true;
+  remove.dataset.analyticsId = 'qbc-hist-remove';
+  remove.addEventListener('click', () => confirmRemoval(b, chosen(), confirmArea, actions));
+  const inQb = boxes.filter(([box]) => !box.disabled);
+  const all = el('button', 'link', `Select all ${inQb.length} in QuickBooks`);
+  all.type = 'button';
+  all.hidden = inQb.length < 2;
+  all.dataset.analyticsId = 'qbc-hist-select-all';
+  all.addEventListener('click', () => {
+    for (const [box] of inQb) box.checked = true;
+    remove.disabled = !chosen().length;
+  });
+  actions.append(remove, all);
+  if (b.kind === 'invoices' && inQb.length) {
+    const pick = el('select');
+    pick.setAttribute('aria-label', 'How to remove invoices');
+    for (const [v, label] of [['delete', 'Delete the invoices'], ['void', 'Void the invoices (kept at zero)']]) {
+      const o = el('option', null, label);
+      o.value = v;
+      pick.append(o);
+    }
+    pick.value = hist.invoiceAction;
+    pick.addEventListener('change', () => { hist.invoiceAction = pick.value; });
+    actions.append(pick);
+  }
+  if (b.records.some((r) => r.state === 'refused')) {
+    actions.append(fixLink('Fix in AveeCare', b.kind === 'payroll' ? '/payroll' : '/billing'));
+    const again = el('button', 'btn small-btn', 'Sync again');
+    again.type = 'button';
+    again.title = 'Refused records stay queued and are tried again on every sync.';
+    again.dataset.analyticsId = 'qbc-hist-sync-again';
+    again.addEventListener('click', () => { showTab('sync'); startSync(); });
+    actions.append(again);
+  }
+  d.append(actions, confirmArea);
+  return d;
+}
+
+/** Name exactly what will be removed, and how, before anything is queued. */
+function confirmRemoval(batch, records, area, actions) {
+  if (!records.length) return;
+  const how = batch.kind === 'invoices'
+    ? (hist.invoiceAction === 'void' ? 'voided (kept in QuickBooks at zero)' : 'deleted from QuickBooks')
+    : 'removed from QuickBooks';
+  const box = el('div', 'callout warn decision');
+  box.dataset.testid = 'qbc-remove-confirm';
+  box.append(el('p', 'review-sub', `${plural(records.length, 'record', 'records')} will be ${how} on the next sync:`));
+  const ul = el('ul', 'plain-list');
+  for (const r of records.slice(0, 12)) ul.append(el('li', 'small', r.label));
+  if (records.length > 12) ul.append(el('li', 'small', `and ${records.length - 12} more`));
+  box.append(ul);
+  box.append(el('p', 'small muted', 'Records changed in QuickBooks since, or already on a paycheck or paid, are not touched; each one tells you why.'));
+  const row = el('div', 'callout-actions');
+  const go = el('button', 'btn primary small-btn', batch.kind === 'invoices' && hist.invoiceAction === 'void' ? 'Void them' : 'Remove them');
+  go.type = 'button';
+  go.dataset.analyticsId = 'qbc-hist-remove-confirm';
+  const keep = el('button', 'btn small-btn', 'Keep them');
+  keep.type = 'button';
+  keep.addEventListener('click', () => { area.replaceChildren(); actions.hidden = false; });
+  go.addEventListener('click', () => removeRecords(batch, records, go));
+  row.append(go, keep);
+  box.append(row);
+  actions.hidden = true;
+  area.replaceChildren(box);
+}
+
+function renderHistoryArea() {
+  const area = $('hist-area');
+  const data = hist.data || { batches: [], changes: [] };
+  const nodes = [];
+  const needs = (data.changes || []).filter((c) => c.state === 'held' || c.state === 'conflict' || c.state === 'failed');
+  for (const g of groupDecisions(needs)) nodes.push(decisionCard(g));
+  const waiting = (data.changes || []).filter((c) => c.state === 'pending' || c.state === 'running' || c.state === 'retry');
+  if (waiting.length) {
+    const c = callout('ok', `${plural(waiting.length, 'change is', 'changes are')} waiting for the next QuickBooks sync.`);
+    const actions = el('div', 'callout-actions');
+    const go = el('button', 'btn small-btn', 'Sync now');
+    go.type = 'button';
+    go.dataset.analyticsId = 'qbc-hist-sync-now';
+    go.addEventListener('click', () => { showTab('sync'); startSync(); });
+    actions.append(go);
+    c.append(actions);
+    nodes.push(c);
+  }
+  for (const b of data.batches || []) if ((b.records || []).length) nodes.push(batchNode(b));
+  if (!nodes.length) nodes.push(el('p', 'muted small', 'Nothing was sent to QuickBooks in the last 14 days.'));
+  area.replaceChildren(...nodes);
+}
+
 // ---------- wiring ----------
 
 function initSendTab() {
@@ -425,6 +713,10 @@ function initSendTab() {
   $('inv-end').value = i.end;
   $('pay-check').addEventListener('click', reviewPayroll);
   $('inv-check').addEventListener('click', reviewInvoices);
+  $('hist-refresh').addEventListener('click', loadHistory);
+  // Read on demand: when the Send tab is opened, and after each sync.
+  document.querySelector('[data-tab=send]').addEventListener('click', loadHistory);
+  listen('sync-finished', () => { if (!$('tab-send').hidden || hist.data) loadHistory(); });
   // A changed range makes the review on screen stale.
   for (const id of ['pay-start', 'pay-end']) $(id).addEventListener('change', () => { pay.check = null; $('pay-review').replaceChildren(); });
   for (const id of ['inv-start', 'inv-end']) $(id).addEventListener('change', () => { if (!inv.created) $('inv-review').replaceChildren(); });

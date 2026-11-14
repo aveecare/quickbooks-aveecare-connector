@@ -244,3 +244,14 @@ input, select {
 .send-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .callout.ok { background: #eef8f1; color: #14532d; }
 .review .callout { margin-top: 0; }
+.callout.warn { background: var(--amber-bg); color: #5c3b00; }
+.decision { display: flex; flex-direction: column; gap: 4px; }
+.batch { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.batch summary { cursor: pointer; }
+.batch-title { font-weight: 500; }
+.batch[open] summary { margin-bottom: 8px; }
+.record-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; }
+.record { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+.record input { min-height: 0; margin-top: 3px; }
+.record.refused .record-main div:last-child { color: var(--red); }
+.batch select { min-height: 28px; font-size: 12.5px; }
