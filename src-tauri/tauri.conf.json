@@ -12,6 +12,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "AveeCare QuickBooks Connector",
         "width": 880,
         "height": 640,

@@ -598,6 +598,23 @@ pub fn run() {
             install_update
         ])
         .setup(move |app| {
+            // The main window is built here rather than from tauri.conf.json so a
+            // debug build can open WebView2's remote-debugging port for drives
+            // (AVEECARE_WEBVIEW_DEBUG_PORT). WebView2 ignores
+            // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS in an elevated process, and the
+            // Connector runs elevated whenever QuickBooks does. Release builds
+            // never read the variable.
+            let main_cfg = app.config().app.windows.iter().find(|w| w.label == "main").cloned().expect("main window config");
+            #[allow(unused_mut)]
+            let mut main_window = tauri::WebviewWindowBuilder::from_config(app.handle(), &main_cfg)?;
+            #[cfg(debug_assertions)]
+            if let Some(port) = std::env::var("AVEECARE_WEBVIEW_DEBUG_PORT").ok().and_then(|p| p.parse::<u16>().ok()) {
+                main_window = main_window.additional_browser_args(&format!(
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"
+                ));
+            }
+            main_window.build()?;
+
             let open = MenuItem::with_id(app, "open", "Open AveeCare Connector", true, None::<&str>)?;
             let sync = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
