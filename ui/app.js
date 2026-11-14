@@ -107,6 +107,7 @@ function subline(run) {
 
 function show(view) {
   for (const v of ['loading', 'updating', 'signin', 'app']) $(`view-${v}`).hidden = v !== view;
+  state.view = view;
 }
 
 function showTab(tab) {
@@ -629,18 +630,25 @@ function withTimeout(promise, ms) {
 
 async function installUpdateNow(version) {
   show('updating');
-  $('updating-title').textContent = version ? `Updating to version ${version}` : 'Updating the Connector';
+  if (version) $('updating-title').textContent = `Updating to version ${version}`;
   $('updating-error').hidden = true;
-  $('updating-retry').hidden = true;
+  for (const id of ['updating-retry', 'updating-skip', 'updating-skip-note']) $(id).hidden = true;
   $('updating-fill').style.width = '0%';
   try {
     await invoke('install_update');
   } catch (e) {
     $('updating-error').hidden = false;
     $('updating-error').textContent = e?.message || String(e);
-    $('updating-retry').hidden = false;
+    for (const id of ['updating-retry', 'updating-skip', 'updating-skip-note']) $(id).hidden = false;
     throw e;
   }
+}
+
+/** Resolves when the person chooses to open this version after a failed install. */
+function waitForSkip() {
+  return new Promise((resolve) => {
+    $('updating-skip').onclick = () => resolve();
+  });
 }
 
 /** True when an update was found and is installing (the app is about to close). */
@@ -653,11 +661,17 @@ async function updateIfAvailable() {
     return false;
   }
   if (!r?.available) return false;
+  const before = state.view;
   try {
     await installUpdateNow(r.version);
   } catch {
-    // The retry button stays on screen; the Connector does not open an old build past a found update.
-    return true;
+    // An update that will not install (a bad download, a release missing its
+    // signature) must never lock an agency out of payroll: Try again stays on
+    // screen beside a labeled way to open this version, and the update is
+    // tried again on the next check and the next launch.
+    await waitForSkip();
+    if (before === 'app' || before === 'signin') show(before);
+    return false;
   }
   return true;
 }

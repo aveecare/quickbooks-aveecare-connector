@@ -62,7 +62,7 @@ jobs:
 
             Windows may say "Windows protected your PC" because this installer is not yet code-signed. Choose **More info**, then **Run anyway**.
 
-            Already installed? The Connector updates itself (Settings, Check for updates).
+            Already installed? The Connector installs this version by itself the next time it opens.
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

@@ -130,7 +130,11 @@ publishes the GitHub release with `latest.json`.
 
 Installed copies check
 `https://github.com/aveecare/quickbooks-aveecare-connector/releases/latest/download/latest.json`
-when the person presses Settings, Check for updates, and install a newer version. Every update
+every time the Connector opens, and install a newer version before anything else (the window
+shows the progress and the new version opens by itself). Offline, the Connector opens as it is
+and checks again every few hours, never during a sync. Settings, Check for updates does the
+same on demand. If an update cannot install, the window says why and offers Try again or Open
+this version for now, so a bad release never locks an agency out. Every update
 is verified against the public key in `src-tauri/tauri.conf.json`; a file not signed with the
 matching private key is refused, so this protection does not depend on code signing.
 
