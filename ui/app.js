@@ -99,12 +99,12 @@ function subline(run) {
 // ---------- views ----------
 
 function show(view) {
-  for (const v of ['loading', 'signin', 'app']) $(`view-${v}`).hidden = v !== view;
+  for (const v of ['loading', 'updating', 'signin', 'app']) $(`view-${v}`).hidden = v !== view;
 }
 
 function showTab(tab) {
   for (const b of document.querySelectorAll('.segmented button')) b.classList.toggle('active', b.dataset.tab === tab);
-  for (const t of ['sync', 'activity', 'settings']) $(`tab-${t}`).hidden = t !== tab;
+  for (const t of ['sync', 'send', 'activity', 'settings']) $(`tab-${t}`).hidden = t !== tab;
   if (tab === 'activity') closeDetail();
 }
 
@@ -601,7 +601,66 @@ async function enterApp() {
   if (state.history[0] && !state.running) $('result-area').replaceChildren(resultCard(state.history[0]));
 }
 
+/**
+ * MANDATORY UPDATE. Every launch asks GitHub for a newer version first and, if
+ * there is one, installs it before the Connector does anything else, so no
+ * agency keeps sending with an old build. Offline or GitHub unreachable: the
+ * Connector opens as it is (sending payroll must not depend on GitHub) and
+ * tries again every few hours. Never in the middle of a sync.
+ */
+const UPDATE_CHECK_TIMEOUT_MS = 15000;
+const UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000;
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timed out')), ms))]);
+}
+
+async function installUpdateNow(version) {
+  show('updating');
+  $('updating-title').textContent = version ? `Updating to version ${version}` : 'Updating the Connector';
+  $('updating-error').hidden = true;
+  $('updating-retry').hidden = true;
+  $('updating-fill').style.width = '0%';
+  try {
+    await invoke('install_update');
+  } catch (e) {
+    $('updating-error').hidden = false;
+    $('updating-error').textContent = e?.message || String(e);
+    $('updating-retry').hidden = false;
+    throw e;
+  }
+}
+
+/** True when an update was found and is installing (the app is about to close). */
+async function updateIfAvailable() {
+  let r;
+  try {
+    r = await withTimeout(invoke('check_update'), UPDATE_CHECK_TIMEOUT_MS);
+  } catch (e) {
+    console.warn('[update] check failed; opening as is', e);
+    return false;
+  }
+  if (!r?.available) return false;
+  try {
+    await installUpdateNow(r.version);
+  } catch {
+    // The retry button stays on screen; the Connector does not open an old build past a found update.
+    return true;
+  }
+  return true;
+}
+
 async function boot() {
+  await listen('update-progress', (e) => {
+    const { downloaded, total } = e.payload || {};
+    if (total) $('updating-fill').style.width = `${Math.min(100, Math.round((downloaded / total) * 100))}%`;
+  });
+  $('updating-retry').addEventListener('click', () => installUpdateNow().catch(() => {}));
+  if (await updateIfAvailable()) return;
+  setInterval(() => {
+    if (!state.running) updateIfAvailable();
+  }, UPDATE_RECHECK_MS);
+
   state.info = await invoke('app_info');
   const s = await invoke('get_state');
   state.settings = s.settings;

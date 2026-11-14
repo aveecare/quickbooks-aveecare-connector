@@ -59,6 +59,7 @@ pub struct Session {
     server_url: String,
     cognito: Mutex<Option<CognitoClient>>,
     tokens: Mutex<Option<Tokens>>,
+    graphql: Mutex<Option<String>>,
     secrets: Box<dyn SecretStore>,
 }
 
@@ -68,7 +69,7 @@ fn now() -> i64 {
 
 impl Session {
     pub fn new(server_url: &str, secrets: Box<dyn SecretStore>) -> Self {
-        Self { server_url: server_url.trim_end_matches('/').to_string(), cognito: Mutex::new(None), tokens: Mutex::new(None), secrets }
+        Self { server_url: server_url.trim_end_matches('/').to_string(), cognito: Mutex::new(None), tokens: Mutex::new(None), graphql: Mutex::new(None), secrets }
     }
 
     pub fn server_url(&self) -> &str {
@@ -124,10 +125,10 @@ impl Session {
     }
 
     /// A current ID token: the one in hand, or a fresh one from the refresh token.
-    pub fn id_token(&self) -> Result<String, ApiError> {
+    fn fresh_tokens(&self) -> Result<Tokens, ApiError> {
         if let Some(t) = self.tokens.lock().unwrap().as_ref() {
             if t.seconds_left(now()) > REFRESH_MARGIN_SECONDS {
-                return Ok(t.id_token.clone());
+                return Ok(t.clone());
             }
         }
         let refresh = self
@@ -144,9 +145,8 @@ impl Session {
         })?;
         match cognito.refresh(&refresh) {
             Ok(t) => {
-                let id = t.id_token.clone();
-                self.keep(t);
-                Ok(id)
+                self.keep(t.clone());
+                Ok(t)
             }
             Err(AuthError::Network(m)) => Err(ApiError::Network(m)),
             Err(e) => {
@@ -159,6 +159,42 @@ impl Session {
                 }))
             }
         }
+    }
+
+    /// The ID token: what `/api/qbwc/connector` checks.
+    pub fn id_token(&self) -> Result<String, ApiError> {
+        Ok(self.fresh_tokens()?.id_token)
+    }
+
+    /// The access token: what the AveeCare API (AppSync) checks, the same token
+    /// the web app sends. It carries the agency and role claims the server's
+    /// own checks read (the pre-token trigger writes them to the access token).
+    pub fn access_token(&self) -> Result<String, ApiError> {
+        let t = self.fresh_tokens()?;
+        if t.access_token.is_empty() {
+            return Err(ApiError::SignedOut("Your AveeCare sign-in has ended. Sign in again.".into()));
+        }
+        Ok(t.access_token)
+    }
+
+    /// The AveeCare API address, from the server's own description of itself.
+    pub fn graphql_url(&self) -> Result<String, ApiError> {
+        if let Some(u) = self.graphql.lock().unwrap().as_ref() {
+            return Ok(u.clone());
+        }
+        let info = self.api().server_info()?;
+        let url = info.api.map(|a| a.graphql).filter(|u| !u.is_empty()).ok_or_else(|| {
+            ApiError::Server("This AveeCare server does not offer payroll and billing to the Connector yet. Update AveeCare, or send from AveeCare in your browser.".into())
+        })?;
+        *self.graphql.lock().unwrap() = Some(url.clone());
+        Ok(url)
+    }
+
+    /// One AveeCare operation (billingAPI or payrollAPI), run with this sign-in.
+    pub fn aveecare(&self, api: crate::aveecare::Api, operation: &str, input: &serde_json::Value) -> Result<serde_json::Value, ApiError> {
+        let url = self.graphql_url()?;
+        let token = self.access_token()?;
+        crate::aveecare::AveeCareApi::new(&url).call(&token, api, operation, input)
     }
 
     /// Who is signed in, and may they connect (the server decides).
@@ -192,6 +228,7 @@ mod tests {
         let s = Session::new("http://127.0.0.1:1/", Box::new(MemStore::default()));
         s.keep(Tokens { id_token: "id".into(), access_token: "a".into(), refresh_token: Some("r".into()), expires_at: now() + 3600 });
         assert_eq!(s.id_token().unwrap(), "id");
+        assert_eq!(s.access_token().unwrap(), "a");
         assert!(s.has_saved_sign_in());
         assert_eq!(s.secrets.get("refresh:http://127.0.0.1:1").as_deref(), Some("r"));
     }

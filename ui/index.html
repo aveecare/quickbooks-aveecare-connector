@@ -6,11 +6,24 @@
   <title>AveeCare QuickBooks Connector</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="app.js" defer></script>
+  <script src="send.js" defer></script>
 </head>
 <body>
   <!-- Loading -->
   <main id="view-loading" class="view center">
     <img class="mark" src="icon.png" alt="" width="56" height="56" />
+  </main>
+
+  <!-- Updating: every launch installs a newer version before anything else -->
+  <main id="view-updating" class="view center" hidden>
+    <div class="auth-card">
+      <img class="mark" src="icon.png" alt="" width="56" height="56" />
+      <h1 id="updating-title">Updating the Connector</h1>
+      <p id="updating-text" class="muted">A newer version is out. It installs now and the Connector opens again by itself.</p>
+      <div class="bar"><div id="updating-fill" class="bar-fill"></div></div>
+      <p id="updating-error" class="form-error" role="alert" hidden></p>
+      <button id="updating-retry" class="btn primary wide" type="button" hidden data-analytics-id="qbc-update-retry">Try again</button>
+    </div>
   </main>
 
   <!-- Sign in -->
@@ -61,6 +74,7 @@
       </div>
       <nav class="segmented" role="tablist" aria-label="Sections">
         <button role="tab" data-tab="sync" class="active" data-analytics-id="qbc-tab-sync">Sync</button>
+        <button role="tab" data-tab="send" data-analytics-id="qbc-tab-send">Send</button>
         <button role="tab" data-tab="activity" data-analytics-id="qbc-tab-activity">Activity</button>
         <button role="tab" data-tab="settings" data-analytics-id="qbc-tab-settings">Settings</button>
       </nav>
@@ -100,6 +114,35 @@
       <h2 class="section-title">Recent</h2>
       <ul id="recent-list" class="run-list"></ul>
       <p id="recent-empty" class="muted empty" hidden>No syncs yet. When your office sends payroll or invoices to QuickBooks Desktop in AveeCare, press Sync now.</p>
+    </section>
+
+    <!-- Send tab: run payroll and billing (ui/send.js) -->
+    <section id="tab-send" class="tab" hidden>
+      <div class="card send-card">
+        <div class="send-head">
+          <h2>Payroll</h2>
+          <p class="muted small">Send a pay period's hours to QuickBooks, as Payroll in AveeCare does.</p>
+        </div>
+        <div class="range-row">
+          <label class="field"><span>From</span><input id="pay-start" type="date" /></label>
+          <label class="field"><span>To</span><input id="pay-end" type="date" /></label>
+          <button id="pay-check" class="btn" type="button" data-analytics-id="qbc-pay-review">Review</button>
+        </div>
+        <div id="pay-review" class="review" aria-live="polite"></div>
+      </div>
+
+      <div class="card send-card">
+        <div class="send-head">
+          <h2>Invoices</h2>
+          <p class="muted small">Create invoices for the visits in a date range and send them to QuickBooks, as Billing in AveeCare does.</p>
+        </div>
+        <div class="range-row">
+          <label class="field"><span>From</span><input id="inv-start" type="date" /></label>
+          <label class="field"><span>To</span><input id="inv-end" type="date" /></label>
+          <button id="inv-check" class="btn" type="button" data-analytics-id="qbc-inv-review">Review</button>
+        </div>
+        <div id="inv-review" class="review" aria-live="polite"></div>
+      </div>
     </section>
 
     <!-- Activity tab -->
@@ -156,7 +199,7 @@
         <div class="setting">
           <div>
             <div class="setting-title">Version <span id="version"></span></div>
-            <div id="update-line" class="muted small">Updates install from AveeCare's GitHub releases.</div>
+            <div id="update-line" class="muted small">New versions install by themselves when the Connector opens.</div>
           </div>
           <button id="update-btn" class="btn" data-analytics-id="qbc-check-update">Check for updates</button>
         </div>

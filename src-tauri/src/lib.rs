@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod aveecare;
 pub mod config;
 pub mod qb;
 pub mod session;
@@ -412,6 +413,18 @@ async fn check_update(app: AppHandle) -> Result<Value, UiError> {
     }
 }
 
+/// Run one AveeCare payroll or billing operation with this sign-in (the
+/// operations Payroll and Billing in the web app call; see aveecare.rs).
+#[tauri::command]
+async fn aveecare_call(state: State<'_, AppState>, api: String, operation: String, input: Value) -> Result<Value, UiError> {
+    let which = aveecare::Api::parse(&api).ok_or_else(|| ui_err("Other", "Unknown AveeCare area."))?;
+    let s = state.session();
+    let result = tauri::async_runtime::spawn_blocking(move || s.aveecare(which, &operation, &input))
+        .await
+        .map_err(|e| ui_err("Other", e.to_string()))?;
+    result.map_err(UiError::from)
+}
+
 #[tauri::command]
 async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Result<(), UiError> {
     if state.running.load(Ordering::SeqCst) {
@@ -419,7 +432,21 @@ async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Result<()
     }
     let updater = app.updater().map_err(|e| ui_err("Other", e.to_string()))?;
     let update = updater.check().await.map_err(|e| ui_err("Network", e.to_string()))?.ok_or_else(|| ui_err("Other", "You already have the newest version."))?;
-    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| ui_err("Other", format!("The update did not install: {e}")))?;
+    // Progress for the window: bytes so far and the total when GitHub sends one.
+    let progress_app = app.clone();
+    let mut downloaded: u64 = 0;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = progress_app.emit("update-progress", json!({ "downloaded": downloaded, "total": total }));
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| ui_err("Other", format!("The update did not install: {e}")))?;
+    // On Windows the installer closes the app and opens the new version itself;
+    // this restart covers the case where it did not.
     app.restart();
 }
 
@@ -504,6 +531,7 @@ pub fn run() {
             confirm_code,
             load_profile,
             sign_out,
+            aveecare_call,
             sync_now,
             cancel_sync,
             clear_history,

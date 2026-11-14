@@ -153,6 +153,14 @@ pub struct ServerInfo {
     #[serde(default)]
     pub protocol: u32,
     pub cognito: Option<CognitoConfig>,
+    /// The AveeCare API the web app calls; absent on servers older than it.
+    #[serde(default)]
+    pub api: Option<ServerApi>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerApi {
+    pub graphql: String,
 }
 
 pub struct HttpConnectorApi {
@@ -229,7 +237,7 @@ pub fn api_error(status: u16, reason: &str, message: &str) -> ApiError {
     ApiError::Server(format!("AveeCare answered {status} ({reason})."))
 }
 
-fn network_sentence(e: &reqwest::Error) -> String {
+pub(crate) fn network_sentence(e: &reqwest::Error) -> String {
     if e.is_timeout() {
         "AveeCare did not answer in time. Check your internet connection.".into()
     } else {
