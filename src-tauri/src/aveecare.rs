@@ -151,7 +151,15 @@ pub fn read_answer(status: u16, field: &str, v: &Value) -> Result<Value, ApiErro
         .filter(|m| !m.is_empty())
         .unwrap_or("AveeCare could not do that.")
         .to_string();
-    Err(ApiError::Refused { reason: "Refused".into(), message })
+    // The server's own code (CAPABILITY_OFF when Billing is turned off for this
+    // person) lets the window tell a permission refusal from any other.
+    let reason = envelope
+        .get("code")
+        .and_then(|c| c.as_str())
+        .filter(|c| !c.is_empty())
+        .unwrap_or("Refused")
+        .to_string();
+    Err(ApiError::Refused { reason, message })
 }
 
 #[cfg(test)]
@@ -177,6 +185,18 @@ mod tests {
     fn success_returns_the_data_from_a_string_envelope() {
         let v = json!({ "data": { "payrollAPI": "{\"success\":true,\"data\":{\"ready\":3}}" } });
         assert_eq!(read_answer(200, "payrollAPI", &v).unwrap(), json!({ "ready": 3 }));
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_servers_code() {
+        let body = serde_json::json!({ "success": false, "error": "Billing is turned off for you.", "code": "CAPABILITY_OFF" }).to_string();
+        let v = serde_json::json!({ "data": { "billingAPI": body } });
+        match read_answer(200, "billingAPI", &v) {
+            Err(ApiError::Refused { reason, .. }) => assert_eq!(reason, "CAPABILITY_OFF"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        let plain = serde_json::json!({ "data": { "billingAPI": serde_json::json!({ "success": false, "error": "No" }).to_string() } });
+        assert!(matches!(read_answer(200, "billingAPI", &plain), Err(ApiError::Refused { reason, .. }) if reason == "Refused"));
     }
 
     #[test]

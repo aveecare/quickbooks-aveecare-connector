@@ -37,6 +37,8 @@ pub struct AppState {
     session: Mutex<Arc<Session>>,
     profile: Mutex<Option<Profile>>,
     running: AtomicBool,
+    /// An update is downloading or installing: no sync may start until it ends.
+    updating: AtomicBool,
     cancel: Arc<AtomicBool>,
     last_auto: Mutex<Option<Instant>>,
 }
@@ -229,6 +231,12 @@ fn cancel_sync(state: State<AppState>) {
 fn start_sync(app: &AppHandle, state: &AppState, trigger: &str, allow_file: Option<String>) -> Result<(), UiError> {
     if state.running.swap(true, Ordering::SeqCst) {
         return Err(ui_err("Busy", "A sync is already running."));
+    }
+    // Claimed `running` first, then looked at `updating` (install_update does
+    // the reverse), so a sync and an update can never both go ahead.
+    if state.updating.load(Ordering::SeqCst) {
+        state.running.store(false, Ordering::SeqCst);
+        return Err(ui_err("Busy", "The Connector is updating. Sync again once it reopens."));
     }
     state.cancel.store(false, Ordering::SeqCst);
     let app = app.clone();
@@ -425,26 +433,72 @@ async fn aveecare_call(state: State<'_, AppState>, api: String, operation: Strin
     result.map_err(UiError::from)
 }
 
+/// The longest a whole update download may take (the installer is a few MB).
+const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// No bytes for this long and the download has stopped.
+const UPDATE_STALL: Duration = Duration::from_secs(90);
+
 #[tauri::command]
 async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Result<(), UiError> {
+    if state.updating.swap(true, Ordering::SeqCst) {
+        return Err(ui_err("Busy", "The update is already installing."));
+    }
+    // Held for the whole download and install; released only if it fails, so
+    // an automatic sync can never start partway and be cut off by the installer.
+    struct Release<'a>(&'a AtomicBool);
+    impl Drop for Release<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
+    }
+    let release = Release(&state.updating);
     if state.running.load(Ordering::SeqCst) {
         return Err(ui_err("Busy", "Wait for the sync to finish, then update."));
     }
     let updater = app.updater().map_err(|e| ui_err("Other", e.to_string()))?;
-    let update = updater.check().await.map_err(|e| ui_err("Network", e.to_string()))?.ok_or_else(|| ui_err("Other", "You already have the newest version."))?;
+    let mut update = updater.check().await.map_err(|e| ui_err("Network", e.to_string()))?.ok_or_else(|| ui_err("Other", "You already have the newest version."))?;
+    // A stalled download must end in an error the window can offer Try again
+    // and "Open this version" for, never a progress bar that waits forever.
+    // The plugin does not carry the builder's timeout into the download (its
+    // Update starts with none), so the limit is set on the Update itself, and a
+    // watchdog stops a download that has sent nothing for UPDATE_STALL.
+    update.timeout = Some(UPDATE_DOWNLOAD_TIMEOUT);
+    let started = Instant::now();
+    let last_chunk_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let downloaded_all = Arc::new(AtomicBool::new(false));
     // Progress for the window: bytes so far and the total when GitHub sends one.
     let progress_app = app.clone();
     let mut downloaded: u64 = 0;
-    update
-        .download_and_install(
-            move |chunk, total| {
-                downloaded += chunk as u64;
-                let _ = progress_app.emit("update-progress", json!({ "downloaded": downloaded, "total": total }));
-            },
-            || {},
-        )
-        .await
-        .map_err(|e| ui_err("Other", format!("The update did not install: {e}")))?;
+    let chunk_seen = last_chunk_ms.clone();
+    let finished = downloaded_all.clone();
+    let install = update.download_and_install(
+        move |chunk, total| {
+            downloaded += chunk as u64;
+            chunk_seen.store(started.elapsed().as_millis() as u64, Ordering::SeqCst);
+            let _ = progress_app.emit("update-progress", json!({ "downloaded": downloaded, "total": total }));
+        },
+        move || finished.store(true, Ordering::SeqCst),
+    );
+    // Watches the download only: once every byte is in, the installer runs
+    // undisturbed (dropping it partway through installing is never done).
+    let watchdog = async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            if downloaded_all.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            let idle = started.elapsed().saturating_sub(Duration::from_millis(last_chunk_ms.load(Ordering::SeqCst)));
+            if idle >= UPDATE_STALL {
+                return;
+            }
+        }
+    };
+    tokio::select! {
+        r = install => r.map_err(|e| ui_err("Other", format!("The update did not install: {e}")))?,
+        _ = watchdog => return Err(ui_err("Network", "The download stopped partway. Check the internet connection, then press Try again.")),
+    }
+    // Installed: keep `updating` held until the app closes.
+    std::mem::forget(release);
     // On Windows the installer closes the app and opens the new version itself;
     // this restart covers the case where it did not.
     app.restart();
@@ -520,6 +574,7 @@ pub fn run() {
             session: Mutex::new(session),
             profile: Mutex::new(None),
             running: AtomicBool::new(false),
+            updating: AtomicBool::new(false),
             cancel: Arc::new(AtomicBool::new(false)),
             last_auto: Mutex::new(Some(Instant::now())),
         })

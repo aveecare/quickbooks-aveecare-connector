@@ -644,9 +644,22 @@ async function installUpdateNow(version) {
   }
 }
 
-/** Resolves when the person chooses to open this version after a failed install. */
-function waitForSkip() {
-  return new Promise((resolve) => {
+/**
+ * Resolves when the person chooses to open this version after a failed install.
+ * Started with Windows (the window hidden in the tray), nobody is there to
+ * click, so it opens this version at once: otherwise the sign-in never loads
+ * and scheduled syncs quietly stop. The next check and the next launch try the
+ * update again.
+ */
+async function waitForSkip() {
+  let visible = true;
+  try {
+    visible = await window.__TAURI__.window.getCurrentWindow().isVisible();
+  } catch (e) {
+    console.warn('[update] could not tell whether the window is open', e);
+  }
+  if (!visible) return;
+  await new Promise((resolve) => {
     $('updating-skip').onclick = () => resolve();
   });
 }
@@ -684,7 +697,8 @@ async function boot() {
   $('updating-retry').addEventListener('click', () => installUpdateNow().catch(() => {}));
   if (await updateIfAvailable()) return;
   setInterval(() => {
-    if (!state.running) updateIfAvailable();
+    // Never while a sync or a Send-tab run is partway: the installer closes the app.
+    if (!state.running && !(typeof sendTabBusy === 'function' && sendTabBusy())) updateIfAvailable();
   }, UPDATE_RECHECK_MS);
 
   state.info = await invoke('app_info');
