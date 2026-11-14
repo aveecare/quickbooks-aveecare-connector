@@ -22,18 +22,6 @@ no Web Connector password, and every send shows what landed and what QuickBooks 
    Choose **More info**, then **Run anyway**.
 3. Open the Connector and sign in to AveeCare.
 
-### SmartScreen: why Windows warns
-
-The installers are **not code-signed** (AveeCare has no Authenticode certificate yet). Windows
-SmartScreen warns about every unsigned download until it has seen enough people install it, and
-some company-managed computers block unsigned installers outright. The warning is about the
-missing publisher signature, not about anything found in the file.
-
-To remove the warning, buy an OV or EV code-signing certificate (EV is trusted by SmartScreen at
-once; OV earns trust over time) and add it to the release workflow: Tauri signs with
-`bundle.windows.certificateThumbprint` or a `signCommand` (for example Azure Trusted Signing).
-Updates are a separate matter and already protected (see Auto-update).
-
 ## First connection to QuickBooks
 
 QuickBooks asks once, on the first sync, whether to let the Connector in:
