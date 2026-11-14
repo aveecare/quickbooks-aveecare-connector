@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="styles.css" />
   <script src="app.js" defer></script>
   <script src="send.js" defer></script>
+  <script src="travel.js" defer></script>
 </head>
 <body>
   <!-- Loading -->
@@ -195,6 +196,14 @@
           </label>
         </div>
         <p id="settings-saved" class="muted small saved" hidden>Saved.</p>
+      </div>
+
+      <div class="card settings" data-testid="qbc-travel-card">
+        <div class="setting column">
+          <div class="setting-title">Drive time and mileage</div>
+          <div class="muted small">How travel between clients reaches QuickBooks. The same settings as Settings → QuickBooks Desktop in AveeCare.</div>
+        </div>
+        <div id="travel-area"></div>
       </div>
 
       <div class="card settings">

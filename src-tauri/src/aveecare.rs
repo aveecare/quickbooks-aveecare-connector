@@ -48,6 +48,10 @@ pub fn allowed(api: Api, operation: &str) -> bool {
                 | "getQuickBooksDesktopSendHistory"
                 | "queueQuickBooksDesktopChanges"
                 | "resolveQuickBooksDesktopChange"
+                // Drive time and mileage setup (ui/travel.js): the Settings
+                // card's own read and save.
+                | "getQuickBooksDesktopStatus"
+                | "saveQuickBooksDesktopPayrollItemMap"
         ),
         Api::Billing => matches!(
             operation,
@@ -58,6 +62,8 @@ pub fn allowed(api: Api, operation: &str) -> bool {
                 | "qbd-queue-changes"
                 | "qbd-resolve-change"
                 | "qbd-finish-removals"
+                | "qbd-status"
+                | "qbd-save-invoice-settings"
         ),
     }
 }
@@ -155,6 +161,11 @@ mod tests {
     #[test]
     fn only_listed_operations_run() {
         assert!(allowed(Api::Payroll, "queueVisitsForQuickBooksDesktop"));
+        assert!(allowed(Api::Payroll, "saveQuickBooksDesktopPayrollItemMap"));
+        assert!(allowed(Api::Billing, "qbd-save-invoice-settings"));
+        // Other settings stay on the web page.
+        assert!(!allowed(Api::Payroll, "saveQuickBooksDesktopEmployeeMap"));
+        assert!(!allowed(Api::Payroll, "disconnectQuickBooksDesktop"));
         assert!(allowed(Api::Billing, "createInvoicesForRange"));
         assert!(!allowed(Api::Billing, "deleteInvoice"));
         assert!(!allowed(Api::Payroll, "createInvoicesForRange"));

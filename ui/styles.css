@@ -211,6 +211,12 @@ input, select {
 .saved { padding: 0 0 12px; }
 .inline-form { display: flex; gap: 8px; margin-top: 6px; }
 .inline-form input { flex: 1; }
+.inline-form select { flex: 1; min-width: 0; }
+/* Drive time and mileage (travel.js) */
+.check-line { display: flex; align-items: center; gap: 6px; font-size: 13.5px; cursor: pointer; }
+.stack { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.stack label { display: flex; flex-direction: column; gap: 4px; }
+.setting.column > .btn { align-self: flex-start; }
 .advanced summary { cursor: pointer; color: var(--muted); padding: 8px 0 12px; font-weight: 500; }
 
 .switch { position: relative; width: 44px; height: 26px; flex: none; }
